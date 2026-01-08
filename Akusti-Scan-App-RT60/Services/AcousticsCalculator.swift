@@ -253,34 +253,77 @@ final class AcousticsCalculator: Sendable {
         return min(0.99, totalArea / room.totalSurfaceArea)  // Cap at 0.99 for Eyring
     }
 
+    /// Apply proper biquad bandpass filter for octave band analysis
+    /// Uses Audio EQ Cookbook formulas (Robert Bristow-Johnson)
     private func bandpassFilter(samples: [Float], band: FrequencyBand) -> [Float] {
-        // Simple octave band filter using IIR
+        guard samples.count > 0 else { return samples }
+
         let centerFreq = band.frequency
-        let lowCutoff = centerFreq / sqrt(2)
-        let highCutoff = centerFreq * sqrt(2)
+        let q = 1.414  // Q for octave bandwidth (sqrt(2))
 
-        // Normalized frequencies
-        let nyquist = sampleRate / 2
-        let lowNorm = lowCutoff / nyquist
-        let highNorm = min(0.99, highCutoff / nyquist)
+        // Calculate biquad coefficients using Audio EQ Cookbook BPF formula
+        let w0 = 2.0 * Double.pi * centerFreq / sampleRate
+        let alpha = sin(w0) / (2.0 * q)
 
-        // 2nd order Butterworth bandpass coefficients (simplified)
-        let bw = highNorm - lowNorm
-        let centerNorm = (lowNorm + highNorm) / 2
+        let b0 = alpha
+        let b1 = 0.0
+        let b2 = -alpha
+        let a0 = 1.0 + alpha
+        let a1 = -2.0 * cos(w0)
+        let a2 = 1.0 - alpha
 
-        // Apply simple bandpass (moving average approximation for demo)
-        let windowSize = Int(sampleRate / centerFreq)
-        guard windowSize > 1 && samples.count > windowSize else {
-            return samples
+        // Normalize coefficients by a0
+        let coefficients: [Double] = [
+            b0 / a0, b1 / a0, b2 / a0,  // b0, b1, b2
+            a1 / a0, a2 / a0            // a1, a2
+        ]
+
+        // Apply biquad filter using vDSP
+        var filtered = [Float](repeating: 0, count: samples.count)
+        var delay = [Float](repeating: 0, count: 4)  // z^-1, z^-2 for input and output
+
+        // Second-order IIR (biquad) direct form II transposed
+        for i in 0..<samples.count {
+            let input = Double(samples[i])
+
+            // y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2]
+            let output = coefficients[0] * input +
+                        coefficients[1] * Double(delay[0]) +
+                        coefficients[2] * Double(delay[1]) -
+                        coefficients[3] * Double(delay[2]) -
+                        coefficients[4] * Double(delay[3])
+
+            // Update delay lines
+            delay[1] = delay[0]
+            delay[0] = samples[i]
+            delay[3] = delay[2]
+            delay[2] = Float(output)
+
+            filtered[i] = Float(output)
         }
 
-        var filtered = [Float](repeating: 0, count: samples.count)
-        vDSP_vswsum(samples, 1, &filtered, 1, vDSP_Length(samples.count - windowSize), vDSP_Length(windowSize))
+        // Apply filter in reverse for zero-phase filtering (forward-backward)
+        var reversedFiltered = [Float](repeating: 0, count: samples.count)
+        delay = [Float](repeating: 0, count: 4)
 
-        let scale = 1.0 / Float(windowSize)
-        vDSP_vsmul(filtered, 1, [scale], &filtered, 1, vDSP_Length(filtered.count))
+        for i in stride(from: samples.count - 1, through: 0, by: -1) {
+            let input = Double(filtered[i])
 
-        return filtered
+            let output = coefficients[0] * input +
+                        coefficients[1] * Double(delay[0]) +
+                        coefficients[2] * Double(delay[1]) -
+                        coefficients[3] * Double(delay[2]) -
+                        coefficients[4] * Double(delay[3])
+
+            delay[1] = delay[0]
+            delay[0] = filtered[i]
+            delay[3] = delay[2]
+            delay[2] = Float(output)
+
+            reversedFiltered[i] = Float(output)
+        }
+
+        return reversedFiltered
     }
 
     private func calculateRT60FromSamples(_ samples: [Float]) -> Double? {

@@ -11,12 +11,14 @@ import SwiftData
 struct MeasurementView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var audioRecorder = AudioRecorder()
+    @State private var sweptSineGenerator = SweptSineGenerator()
     @State private var analysisResult: AcousticAnalysis?
     @State private var errorMessage: String?
     @State private var isProcessing = false
     @State private var showShareSheet = false
     @State private var pdfURL: URL?
     @State private var showSaveConfirmation = false
+    @State private var measurementMethod: MeasurementMethod = .impulse
 
     @Binding var room: Room
     private let acousticsCalculator = AcousticsCalculator()
@@ -58,7 +60,7 @@ struct MeasurementView: View {
     // MARK: - Sections
 
     private var headerSection: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 12) {
             Image(systemName: "waveform.circle.fill")
                 .font(.system(size: 50))
                 .foregroundStyle(.blue)
@@ -73,6 +75,26 @@ struct MeasurementView: View {
             Text(String(format: "%.1f m³", room.volume))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            // Method Selection
+            VStack(spacing: 8) {
+                Text("Messmethode")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("Methode", selection: $measurementMethod) {
+                    ForEach(MeasurementMethod.allCases) { method in
+                        Text(method.rawValue).tag(method)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(measurementMethod.description)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.top, 8)
         }
         .padding()
     }
@@ -84,27 +106,58 @@ struct MeasurementView: View {
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color.gray.opacity(0.2))
 
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(levelColor)
-                        .frame(width: levelWidth(for: geometry.size.width))
-                        .animation(.easeOut(duration: 0.1), value: audioRecorder.currentLevel)
+                    if measurementMethod == .sweptSine {
+                        // Progress bar for swept sine
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(sweptSineGenerator.isPlaying ? Color.orange : Color.blue)
+                            .frame(width: geometry.size.width * CGFloat(sweptSineGenerator.progress))
+                            .animation(.easeOut(duration: 0.1), value: sweptSineGenerator.progress)
+                    } else {
+                        // Level meter for impulse
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(levelColor)
+                            .frame(width: levelWidth(for: geometry.size.width))
+                            .animation(.easeOut(duration: 0.1), value: audioRecorder.currentLevel)
+                    }
                 }
             }
             .frame(height: 24)
 
             HStack {
-                Text(audioRecorder.isRecording ? "Aufnahme läuft..." : "Bereit")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if measurementMethod == .sweptSine {
+                    Text(sweptSineStatusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(audioRecorder.isRecording ? "Aufnahme läuft..." : "Bereit")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 Spacer()
 
-                Text(String(format: "%.1f dB", audioRecorder.currentLevel))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                if measurementMethod == .impulse {
+                    Text(String(format: "%.1f dB", audioRecorder.currentLevel))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(String(format: "%.0f%%", sweptSineGenerator.progress * 100))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.horizontal)
+    }
+
+    private var sweptSineStatusText: String {
+        if sweptSineGenerator.isPlaying {
+            return "Sweep wird abgespielt..."
+        } else if sweptSineGenerator.isRecording {
+            return "Raumantwort wird aufgenommen..."
+        } else {
+            return "Bereit für Swept Sine Messung"
+        }
     }
 
     private var recordButton: some View {
@@ -290,7 +343,16 @@ struct MeasurementView: View {
 
     private var buttonTitle: String {
         if isProcessing { return "Verarbeite..." }
-        return audioRecorder.isRecording ? "Stoppen & Analysieren" : "Messung starten"
+
+        switch measurementMethod {
+        case .impulse:
+            return audioRecorder.isRecording ? "Stoppen & Analysieren" : "Aufnahme starten"
+        case .sweptSine:
+            if sweptSineGenerator.isPlaying || sweptSineGenerator.isRecording {
+                return "Messung läuft..."
+            }
+            return "Swept Sine starten"
+        }
     }
 
     private var buttonColor: Color {
@@ -314,12 +376,29 @@ struct MeasurementView: View {
     private func toggleRecording() async {
         errorMessage = nil
 
+        switch measurementMethod {
+        case .impulse:
+            await performImpulseMeasurement()
+        case .sweptSine:
+            await performSweptSineMeasurement()
+        }
+    }
+
+    private func performImpulseMeasurement() async {
         if audioRecorder.isRecording {
             isProcessing = true
             let samples = audioRecorder.stopRecording()
 
-            let result = acousticsCalculator.analyzeRoom(room: room, audioSamples: samples)
-            analysisResult = result
+            // Extract impulse response from recording
+            if let irSamples = sweptSineGenerator.extractImpulseResponse(samples: samples) {
+                let result = acousticsCalculator.analyzeRoom(room: room, audioSamples: irSamples)
+                analysisResult = result
+            } else {
+                // Fallback: use raw samples if no impulse detected
+                let result = acousticsCalculator.analyzeRoom(room: room, audioSamples: samples)
+                analysisResult = result
+                errorMessage = "Kein deutlicher Impuls erkannt. Ergebnisse basieren auf Rohaufnahme."
+            }
 
             isProcessing = false
         } else {
@@ -329,6 +408,23 @@ struct MeasurementView: View {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func performSweptSineMeasurement() async {
+        guard !sweptSineGenerator.isPlaying && !sweptSineGenerator.isRecording else { return }
+
+        isProcessing = true
+
+        do {
+            let impulseResponse = try await sweptSineGenerator.measureWithSweep()
+
+            let result = acousticsCalculator.analyzeRoom(room: room, audioSamples: impulseResponse)
+            analysisResult = result
+        } catch {
+            errorMessage = "Swept Sine Messung fehlgeschlagen: \(error.localizedDescription)"
+        }
+
+        isProcessing = false
     }
 
     private func exportPDF(_ result: AcousticAnalysis) {
