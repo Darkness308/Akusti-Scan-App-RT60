@@ -123,9 +123,14 @@ struct StatusHeaderView: View {
             Spacer()
 
             if viewModel.measurementState == .recording {
-                Image(systemName: "waveform")
-                    .foregroundStyle(.red)
-                    .symbolEffect(.pulse)
+                if #available(iOS 17.0, *) {
+                    Image(systemName: "waveform")
+                        .foregroundStyle(.red)
+                        .symbolEffect(.pulse)
+                } else {
+                    Image(systemName: "waveform")
+                        .foregroundStyle(.red)
+                }
             }
         }
         .padding(.horizontal)

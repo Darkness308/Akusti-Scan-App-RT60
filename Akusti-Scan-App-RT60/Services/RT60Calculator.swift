@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import Accelerate
 
 /// RT60-Berechnungsservice
 final class RT60Calculator {
@@ -236,8 +235,14 @@ final class RT60Calculator {
         guard abs(correlation) > 0.9 else { return nil }
 
         // RT60 berechnen: Zeit für 60 dB Abfall
+        // slope ist in dB/s, also RT60 = -60 / slope
         guard slope < 0 else { return nil }
-        let decayTime = -60.0 / slope * extrapolationFactor / (endDB - startDB) * (-60)
+
+        // Berechnung: Der Slope gibt dB pro Sekunde an
+        // RT60 ist die Zeit für 60 dB Abfall
+        // Bei T20: Wir messen 20 dB (-5 bis -25), extrapolieren auf 60 dB (Faktor 3)
+        // Bei T30: Wir messen 30 dB (-5 bis -35), extrapolieren auf 60 dB (Faktor 2)
+        let decayTime = -60.0 / slope
 
         // Plausibilitätsprüfung
         guard decayTime > 0.05 && decayTime < 15.0 else { return nil }
@@ -284,16 +289,10 @@ final class RT60Calculator {
         return 20 * log10(Double(max(rms, 1e-10)))
     }
 
-    /// Wendet einen Bandpass-Filter an
+    /// Wendet einen Bandpass-Filter an (Biquad 2. Ordnung)
     private func applyBandpassFilter(samples: [Float], centerFrequency: Double, sampleRate: Double) -> [Float] {
-        let bandwidth = centerFrequency * 0.7071 // Oktavband
-
-        let lowFreq = centerFrequency / sqrt(2)
-        let highFreq = centerFrequency * sqrt(2)
-
-        // Einfacher Butterworth-ähnlicher Filter (2. Ordnung)
-        let normalizedLow = lowFreq / (sampleRate / 2)
-        let normalizedHigh = highFreq / (sampleRate / 2)
+        // Oktavband-Breite (Q = f0 / bandwidth)
+        let bandwidth = centerFrequency * 0.7071
 
         // Biquad-Koeffizienten für Bandpass
         let Q = centerFrequency / bandwidth
