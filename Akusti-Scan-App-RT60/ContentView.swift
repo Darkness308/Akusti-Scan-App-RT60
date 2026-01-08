@@ -8,203 +8,262 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var audioRecorder = AudioRecorder()
-    @State private var rt60Result: RT60Result?
-    @State private var errorMessage: String?
-    @State private var isProcessing = false
-
-    private let rt60Calculator = RT60Calculator()
+    @State private var room = Room(name: "Mein Raum")
+    @State private var selectedTab = 0
 
     var body: some View {
-        NavigationStack {
+        TabView(selection: $selectedTab) {
+            // Home / Dashboard
+            NavigationStack {
+                HomeView(room: $room)
+            }
+            .tabItem {
+                Label("Start", systemImage: "house.fill")
+            }
+            .tag(0)
+
+            // LiDAR Scan
+            NavigationStack {
+                LiDARScanView(room: $room) { dimensions in
+                    selectedTab = 2
+                }
+            }
+            .tabItem {
+                Label("Scan", systemImage: "camera.metering.matrix")
+            }
+            .tag(1)
+
+            // Measurement
+            NavigationStack {
+                MeasurementView(room: $room)
+            }
+            .tabItem {
+                Label("Messung", systemImage: "waveform")
+            }
+            .tag(2)
+
+            // Room Editor
+            NavigationStack {
+                RoomEditorView(room: $room)
+            }
+            .tabItem {
+                Label("Raum", systemImage: "square.split.bottomrightquarter")
+            }
+            .tag(3)
+        }
+    }
+}
+
+// MARK: - Home View
+
+struct HomeView: View {
+    @Binding var room: Room
+    @State private var recentAnalysis: AcousticAnalysis?
+
+    private let acousticsCalculator = AcousticsCalculator()
+
+    var body: some View {
+        ScrollView {
             VStack(spacing: 24) {
-                // Header
-                headerView
-
-                Spacer()
-
-                // Level Meter
-                levelMeterView
-
-                // Result Display
-                if let result = rt60Result {
-                    resultView(result)
-                }
-
-                // Error Display
-                if let error = errorMessage {
-                    errorView(error)
-                }
-
-                Spacer()
-
-                // Record Button
-                recordButton
+                headerSection
+                roomInfoCard
+                calculatedRT60Card
+                quickActionsSection
+                infoSection
             }
             .padding()
-            .navigationTitle("RT60 Scanner")
         }
+        .navigationTitle("Akusti-Scan")
+        .onAppear { calculatePreview() }
+        .onChange(of: room.volume) { calculatePreview() }
     }
 
-    // MARK: - Subviews
-
-    private var headerView: some View {
-        VStack(spacing: 8) {
+    private var headerSection: some View {
+        VStack(spacing: 12) {
             Image(systemName: "waveform.circle.fill")
                 .font(.system(size: 60))
-                .foregroundStyle(.tint)
+                .foregroundStyle(.blue)
 
-            Text("Nachhallzeit-Messung")
-                .font(.headline)
+            Text("RT60 Akustik-Analyse")
+                .font(.title2.bold())
+
+            Text("Nachhallzeit-Messung und Raumakustik")
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
+        .padding(.vertical)
     }
 
-    private var levelMeterView: some View {
-        VStack(spacing: 8) {
-            // Audio level bar
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.gray.opacity(0.2))
-
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(levelColor)
-                        .frame(width: levelWidth(for: geometry.size.width))
+    private var roomInfoCard: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Image(systemName: "cube.transparent")
+                    .foregroundStyle(.blue)
+                Text(room.name)
+                    .font(.headline)
+                Spacer()
+                NavigationLink {
+                    RoomEditorView(room: $room)
+                } label: {
+                    Image(systemName: "pencil")
+                        .foregroundStyle(.blue)
                 }
             }
-            .frame(height: 20)
 
-            Text(audioRecorder.isRecording ? "Aufnahme läuft..." : "Bereit")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
+            Divider()
 
-    private func resultView(_ result: RT60Result) -> some View {
-        VStack(spacing: 16) {
-            Text("RT60")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 20) {
+                infoItem(title: "Volumen", value: String(format: "%.1f m³", room.volume), icon: "cube")
+                infoItem(title: "Oberfläche", value: String(format: "%.1f m²", room.totalSurfaceArea), icon: "square.stack.3d.up")
+            }
 
-            Text(result.formattedRT60)
-                .font(.system(size: 48, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
-
-            HStack(spacing: 24) {
-                if let t20 = result.t20 {
-                    metricView(title: "T20", value: String(format: "%.2f s", t20))
-                }
-                if let t30 = result.t30 {
-                    metricView(title: "T30", value: String(format: "%.2f s", t30))
-                }
-                if let edt = result.edt {
-                    metricView(title: "EDT", value: String(format: "%.2f s", edt))
-                }
+            HStack(spacing: 20) {
+                infoItem(title: "L × B × H", value: String(format: "%.1f × %.1f × %.1f", room.length, room.width, room.height), icon: "ruler")
+                infoItem(title: "Temperatur", value: String(format: "%.0f °C", room.temperature), icon: "thermometer.medium")
             }
         }
         .padding()
         .background(Color.gray.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
-    private func metricView(title: String, value: String) -> some View {
-        VStack(spacing: 4) {
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.subheadline)
-                .fontWeight(.medium)
-        }
-    }
+    private var calculatedRT60Card: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Image(systemName: "function")
+                    .foregroundStyle(.purple)
+                Text("Berechnete Nachhallzeit")
+                    .font(.headline)
+                Spacer()
+            }
 
-    private func errorView(_ message: String) -> some View {
-        HStack {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-            Text(message)
-                .font(.caption)
+            if let analysis = recentAnalysis {
+                HStack(spacing: 20) {
+                    VStack {
+                        Text("Sabine")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(String(format: "%.2f s", analysis.averageSabineRT60))
+                            .font(.title2.bold())
+                            .foregroundStyle(.blue)
+                    }
+
+                    VStack {
+                        Text("Eyring")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(String(format: "%.2f s", analysis.averageEyringRT60))
+                            .font(.title2.bold())
+                            .foregroundStyle(.purple)
+                    }
+                }
+
+                Text(analysis.qualityAssessment)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .padding()
-        .background(Color.orange.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(Color.purple.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
-    private var recordButton: some View {
-        Button {
-            Task {
-                await toggleRecording()
+    private var quickActionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Schnellaktionen")
+                .font(.headline)
+
+            HStack(spacing: 12) {
+                QuickActionButton(title: "LiDAR Scan", icon: "camera.metering.matrix", color: .purple) {}
+                QuickActionButton(title: "Messung", icon: "mic.fill", color: .green) {}
+                QuickActionButton(title: "Report", icon: "doc.text", color: .orange) {}
             }
-        } label: {
-            HStack {
-                if isProcessing {
-                    ProgressView()
-                        .tint(.white)
-                } else {
-                    Image(systemName: audioRecorder.isRecording ? "stop.fill" : "mic.fill")
-                }
-                Text(buttonTitle)
+        }
+    }
+
+    private var infoSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Über RT60")
+                .font(.headline)
+
+            Text("Die Nachhallzeit RT60 beschreibt die Zeit, die der Schalldruckpegel benötigt, um nach Abschalten der Schallquelle um 60 dB abzufallen.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                infoRow(range: "< 0.5 s", desc: "Sprache, Heimkino")
+                infoRow(range: "0.5 - 1.0 s", desc: "Mehrzweckräume")
+                infoRow(range: "1.0 - 2.0 s", desc: "Konzertsäle")
+                infoRow(range: "> 2.0 s", desc: "Kirchen, große Hallen")
+            }
+        }
+        .padding()
+        .background(Color.gray.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func infoItem(title: String, value: String, icon: String) -> some View {
+        HStack {
+            Image(systemName: icon)
+                .foregroundStyle(.blue)
+                .frame(width: 24)
+
+            VStack(alignment: .leading) {
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func infoRow(range: String, desc: String) -> some View {
+        HStack {
+            Text(range)
+                .font(.caption)
+                .fontWeight(.medium)
+                .frame(width: 80, alignment: .leading)
+            Text(desc)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func calculatePreview() {
+        if room.surfaces.isEmpty {
+            room.createDefaultSurfaces(
+                floorMaterial: .woodFloor,
+                ceilingMaterial: .plasterOnBrick,
+                wallMaterial: .plasterOnBrick
+            )
+        }
+        recentAnalysis = acousticsCalculator.analyzeRoom(room: room)
+    }
+}
+
+struct QuickActionButton: View {
+    let title: String
+    let icon: String
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.title2)
+                Text(title)
+                    .font(.caption)
             }
             .frame(maxWidth: .infinity)
-            .padding()
-            .background(buttonColor)
-            .foregroundStyle(.white)
+            .frame(height: 80)
+            .background(color.opacity(0.1))
+            .foregroundStyle(color)
             .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .disabled(isProcessing)
-    }
-
-    // MARK: - Computed Properties
-
-    private var buttonTitle: String {
-        if isProcessing {
-            return "Verarbeite..."
-        }
-        return audioRecorder.isRecording ? "Stoppen" : "Messung starten"
-    }
-
-    private var buttonColor: Color {
-        audioRecorder.isRecording ? .red : .blue
-    }
-
-    private var levelColor: Color {
-        let level = audioRecorder.currentLevel
-        if level > -10 { return .red }
-        if level > -20 { return .orange }
-        return .green
-    }
-
-    private func levelWidth(for totalWidth: CGFloat) -> CGFloat {
-        // Convert dB level (-60 to 0) to width percentage
-        let normalized = (audioRecorder.currentLevel + 60) / 60
-        return totalWidth * CGFloat(max(0, min(1, normalized)))
-    }
-
-    // MARK: - Actions
-
-    private func toggleRecording() async {
-        errorMessage = nil
-
-        if audioRecorder.isRecording {
-            // Stop and process
-            isProcessing = true
-            let samples = audioRecorder.stopRecording()
-
-            do {
-                rt60Result = try rt60Calculator.calculateRT60(from: samples)
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-
-            isProcessing = false
-        } else {
-            // Start recording
-            do {
-                try await audioRecorder.startRecording()
-            } catch {
-                errorMessage = error.localizedDescription
-            }
         }
     }
 }
