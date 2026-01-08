@@ -5,10 +5,11 @@
 **Akusti-Scan-App-RT60** ist eine iOS-Anwendung zur Messung akustischer Eigenschaften, speziell der RT60-Nachhallzeit (Reverberation Time). RT60 ist die Zeit, die benötigt wird, bis ein Schallsignal um 60 dB abklingt.
 
 ### Aktueller Status
-- **Phase:** Initial Development (Skeleton/Template)
+- **Phase:** Functional Implementation
 - **Version:** 1.0 (Build 1)
 - **Erstellt:** 03.11.2025
 - **Entwickler:** Marc Schneider-Handrup
+- **Features:** RT60 measurement, visualization, history, frequency band analysis
 
 ## 🛠 Technologie-Stack
 
@@ -265,7 +266,7 @@ git push origin feature/your-feature-name
 ```xml
 <!-- Info.plist Einträge -->
 <key>NSMicrophoneUsageDescription</key>
-<string>Diese App benötigt Zugriff auf das Mikrofon für akustische Messungen.</string>
+<string>Diese App benoetigt Zugriff auf das Mikrofon zur RT60-Messung der Raumakustik.</string>
 ```
 
 ### Best Practices
