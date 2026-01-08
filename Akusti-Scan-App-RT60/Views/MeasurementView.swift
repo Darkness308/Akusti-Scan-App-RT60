@@ -6,14 +6,17 @@
 //
 
 import SwiftUI
+import SwiftData
 
 struct MeasurementView: View {
+    @Environment(\.modelContext) private var modelContext
     @State private var audioRecorder = AudioRecorder()
     @State private var analysisResult: AcousticAnalysis?
     @State private var errorMessage: String?
     @State private var isProcessing = false
     @State private var showShareSheet = false
     @State private var pdfURL: URL?
+    @State private var showSaveConfirmation = false
 
     @Binding var room: Room
     private let acousticsCalculator = AcousticsCalculator()
@@ -230,20 +233,43 @@ struct MeasurementView: View {
     }
 
     private func exportButton(_ result: AcousticAnalysis) -> some View {
-        Button {
-            exportPDF(result)
-        } label: {
-            HStack {
-                Image(systemName: "square.and.arrow.up")
-                Text("PDF Report exportieren")
+        VStack(spacing: 12) {
+            // Save Button
+            Button {
+                saveMeasurement(result)
+            } label: {
+                HStack {
+                    Image(systemName: "square.and.arrow.down")
+                    Text("Messung speichern")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.green.opacity(0.1))
+                .foregroundStyle(.green)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(Color.blue.opacity(0.1))
-            .foregroundStyle(.blue)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            // Export Button
+            Button {
+                exportPDF(result)
+            } label: {
+                HStack {
+                    Image(systemName: "square.and.arrow.up")
+                    Text("PDF Report exportieren")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.blue.opacity(0.1))
+                .foregroundStyle(.blue)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
         }
         .padding(.horizontal)
+        .alert("Gespeichert", isPresented: $showSaveConfirmation) {
+            Button("OK") {}
+        } message: {
+            Text("Die Messung wurde im Verlauf gespeichert.")
+        }
     }
 
     private func errorView(_ message: String) -> some View {
@@ -310,6 +336,13 @@ struct MeasurementView: View {
             pdfURL = url
             showShareSheet = true
         }
+    }
+
+    private func saveMeasurement(_ result: AcousticAnalysis) {
+        let record = MeasurementRecord(from: result, room: room)
+        modelContext.insert(record)
+        try? modelContext.save()
+        showSaveConfirmation = true
     }
 }
 

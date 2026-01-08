@@ -50,6 +50,15 @@ struct ContentView: View {
                 Label("Raum", systemImage: "square.split.bottomrightquarter")
             }
             .tag(3)
+
+            // History
+            NavigationStack {
+                HistoryView()
+            }
+            .tabItem {
+                Label("Verlauf", systemImage: "clock.arrow.circlepath")
+            }
+            .tag(4)
         }
     }
 }
