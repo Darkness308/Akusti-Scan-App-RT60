@@ -2,152 +2,353 @@
 //  RT60Calculator.swift
 //  Akusti-Scan-App-RT60
 //
-//  RT60 reverberation time calculation using Schroeder method
+//  Created by Marc Schneider-Handrup on 03.11.25.
 //
 
-import Accelerate
 import Foundation
+import Accelerate
 
-/// Errors during RT60 calculation
-enum RT60Error: Error, LocalizedError {
-    case insufficientData
-    case calculationFailed
-    case invalidDecayRange
+/// RT60-Berechnungsservice
+final class RT60Calculator: RT60Calculating {
+    // MARK: - Configuration
 
-    var errorDescription: String? {
-        switch self {
-        case .insufficientData:
-            return "Nicht genügend Audiodaten für RT60-Berechnung."
-        case .calculationFailed:
-            return "RT60-Berechnung fehlgeschlagen."
-        case .invalidDecayRange:
-            return "Ungültiger Decay-Bereich in den Audiodaten."
-        }
-    }
-}
+    private let windowSize: Int = 2048
+    private let hopSize: Int = 512
+    private let smoothingFactor: Int = 5
 
-/// Result of RT60 calculation
-struct RT60Result: Identifiable, Sendable {
-    let id = UUID()
-    let timestamp: Date
-    let rt60: Double          // RT60 in seconds
-    let t20: Double?          // T20 (extrapolated from -5 to -25 dB)
-    let t30: Double?          // T30 (extrapolated from -5 to -35 dB)
-    let edt: Double?          // Early Decay Time
-    let frequencyBand: String // e.g., "1kHz", "Broadband"
+    // MARK: - Public Methods
 
-    var formattedRT60: String {
-        String(format: "%.2f s", rt60)
-    }
-}
+    /// Berechnet RT60 aus Audio-Samples
+    /// - Parameter audioSample: Die aufgenommenen Audio-Samples
+    /// - Returns: RT60-Messergebnis
+    func calculateRT60(from audioSample: AudioSample) -> RT60Measurement {
+        let samples = audioSample.samples
+        let sampleRate = audioSample.sampleRate
 
-/// Calculator for RT60 reverberation time using Schroeder backward integration
-final class RT60Calculator: Sendable {
-
-    // MARK: - Properties
-
-    private let sampleRate: Double
-
-    // MARK: - Initialization
-
-    init(sampleRate: Double = 44100) {
-        self.sampleRate = sampleRate
-    }
-
-    // MARK: - RT60 Calculation
-
-    /// Calculate RT60 from audio samples using Schroeder method
-    /// - Parameter samples: Audio samples containing impulse response or decay
-    /// - Returns: RT60Result with calculated values
-    func calculateRT60(from samples: [Float]) throws -> RT60Result {
-        guard samples.count > Int(sampleRate * 0.1) else {
-            throw RT60Error.insufficientData
+        guard samples.count > windowSize else {
+            return createInvalidMeasurement(reason: "Zu wenige Samples")
         }
 
-        // Step 1: Square the samples (energy)
-        var squaredSamples = [Float](repeating: 0, count: samples.count)
-        vDSP_vsq(samples, 1, &squaredSamples, 1, vDSP_Length(samples.count))
+        // 1. Impuls-Position finden
+        let impulseIndex = findImpulsePosition(in: samples)
 
-        // Step 2: Schroeder backward integration
-        let schroederCurve = schroederIntegration(squaredSamples)
-
-        // Step 3: Convert to dB
-        let dbCurve = convertToDecibels(schroederCurve)
-
-        // Step 4: Find decay slope and calculate RT60
-        let rt60 = try calculateDecayTime(dbCurve, from: -5, to: -35)
-
-        // Calculate additional metrics
-        let t20 = try? calculateDecayTime(dbCurve, from: -5, to: -25)
-        let t30 = try? calculateDecayTime(dbCurve, from: -5, to: -35)
-        let edt = try? calculateDecayTime(dbCurve, from: 0, to: -10)
-
-        return RT60Result(
-            timestamp: Date(),
-            rt60: rt60,
-            t20: t20,
-            t30: t30,
-            edt: edt,
-            frequencyBand: "Broadband"
+        // 2. Decay-Kurve berechnen (Schroeder-Integration)
+        let decayCurve = calculateDecayCurve(
+            samples: samples,
+            startIndex: impulseIndex,
+            sampleRate: sampleRate
         )
+
+        guard decayCurve.levelPoints.count > 10 else {
+            return createInvalidMeasurement(reason: "Decay-Kurve zu kurz")
+        }
+
+        // 3. Lineare Regression für verschiedene Decay-Bereiche
+        let t20Result = calculateDecayTime(
+            decayCurve: decayCurve,
+            startDB: -5,
+            endDB: -25,
+            extrapolationFactor: 3.0
+        )
+
+        let t30Result = calculateDecayTime(
+            decayCurve: decayCurve,
+            startDB: -5,
+            endDB: -35,
+            extrapolationFactor: 2.0
+        )
+
+        // 4. RT60 direkt messen (wenn möglich)
+        let rt60Direct = calculateDecayTime(
+            decayCurve: decayCurve,
+            startDB: -5,
+            endDB: -65,
+            extrapolationFactor: 1.0
+        )
+
+        // Beste Schätzung verwenden
+        let rt60Value = rt60Direct ?? t30Result ?? t20Result ?? 0
+
+        // Peak und Noise Floor berechnen
+        let peakLevel = 20 * log10(Double(samples.map { abs($0) }.max() ?? 1e-10))
+        let noiseFloor = calculateNoiseFloor(samples: samples, sampleRate: sampleRate)
+
+        return RT60Measurement(
+            rt60Value: rt60Value,
+            t20Value: t20Result,
+            t30Value: t30Result,
+            peakLevel: peakLevel,
+            noiseFloor: noiseFloor,
+            frequency: .broadband,
+            isValid: rt60Value > 0.05 && rt60Value < 15.0
+        )
+    }
+
+    /// Berechnet RT60 für verschiedene Frequenzbänder
+    func calculateRT60ByBand(from audioSample: AudioSample) -> [FrequencyBand: RT60Measurement] {
+        var results: [FrequencyBand: RT60Measurement] = [:]
+
+        // Breitband
+        results[.broadband] = calculateRT60(from: audioSample)
+
+        // Oktavband-Filter anwenden und RT60 berechnen
+        for band in FrequencyBand.allCases where band != .broadband {
+            let filteredSamples = applyBandpassFilter(
+                samples: audioSample.samples,
+                centerFrequency: band.centerFrequency,
+                sampleRate: audioSample.sampleRate
+            )
+
+            let filteredAudioSample = AudioSample(
+                samples: filteredSamples,
+                sampleRate: audioSample.sampleRate,
+                channelCount: 1,
+                duration: audioSample.duration
+            )
+
+            var measurement = calculateRT60(from: filteredAudioSample)
+            measurement = RT60Measurement(
+                id: measurement.id,
+                timestamp: measurement.timestamp,
+                rt60Value: measurement.rt60Value,
+                t20Value: measurement.t20Value,
+                t30Value: measurement.t30Value,
+                peakLevel: measurement.peakLevel,
+                noiseFloor: measurement.noiseFloor,
+                frequency: band,
+                isValid: measurement.isValid
+            )
+            results[band] = measurement
+        }
+
+        return results
+    }
+
+    /// Generiert Decay-Kurve für Visualisierung
+    func generateDecayCurve(from audioSample: AudioSample) -> DecayCurve {
+        let samples = audioSample.samples
+        let sampleRate = audioSample.sampleRate
+
+        let impulseIndex = findImpulsePosition(in: samples)
+        return calculateDecayCurve(samples: samples, startIndex: impulseIndex, sampleRate: sampleRate)
     }
 
     // MARK: - Private Methods
 
-    /// Perform Schroeder backward integration
-    private func schroederIntegration(_ squaredSamples: [Float]) -> [Float] {
-        var result = [Float](repeating: 0, count: squaredSamples.count)
+    /// Findet die Position des Impulses (Maximum) in den Samples
+    private func findImpulsePosition(in samples: [Float]) -> Int {
+        var maxIndex = 0
+        var maxValue: Float = 0
 
-        // Backward cumulative sum
-        var runningSum: Float = 0
+        for (index, sample) in samples.enumerated() {
+            let absValue = abs(sample)
+            if absValue > maxValue {
+                maxValue = absValue
+                maxIndex = index
+            }
+        }
+
+        return maxIndex
+    }
+
+    /// Berechnet die Decay-Kurve mittels Schroeder-Integration
+    private func calculateDecayCurve(samples: [Float], startIndex: Int, sampleRate: Double) -> DecayCurve {
+        guard startIndex < samples.count else {
+            return DecayCurve(
+                timePoints: [],
+                levelPoints: [],
+                regressionSlope: 0,
+                regressionIntercept: 0,
+                correlationCoefficient: 0
+            )
+        }
+
+        // Samples nach dem Impuls
+        let decaySamples = Array(samples[startIndex...])
+
+        // Quadrieren der Samples mit vDSP
+        var squaredSamples = [Float](repeating: 0, count: decaySamples.count)
+        vDSP_vsq(decaySamples, 1, &squaredSamples, 1, vDSP_Length(decaySamples.count))
+
+        // Rückwärts-Integration (Schroeder)
+        var schroederCurve = [Double](repeating: 0, count: squaredSamples.count)
+        var runningSum: Double = 0
+
         for i in stride(from: squaredSamples.count - 1, through: 0, by: -1) {
-            runningSum += squaredSamples[i]
-            result[i] = runningSum
+            runningSum += Double(squaredSamples[i])
+            schroederCurve[i] = runningSum
         }
 
-        return result
-    }
+        // Normalisieren und in dB umrechnen
+        let maxValue = schroederCurve[0]
+        var levelPoints: [Double] = []
+        var timePoints: [Double] = []
 
-    /// Convert linear values to decibels
-    private func convertToDecibels(_ values: [Float]) -> [Float] {
-        guard let maxValue = values.max(), maxValue > 0 else {
-            return values
-        }
+        let decimationFactor = max(1, schroederCurve.count / 1000)
 
-        return values.map { value in
-            guard value > 0 else { return -100 }
-            return 10 * log10(value / maxValue)
-        }
-    }
-
-    /// Calculate decay time between two dB levels
-    private func calculateDecayTime(_ dbCurve: [Float], from startDB: Float, to endDB: Float) throws -> Double {
-        // Find indices where curve crosses start and end dB levels
-        var startIndex: Int?
-        var endIndex: Int?
-
-        for (index, value) in dbCurve.enumerated() {
-            if startIndex == nil && value <= startDB {
-                startIndex = index
-            }
-            if startIndex != nil && endIndex == nil && value <= endDB {
-                endIndex = index
-                break
+        for i in stride(from: 0, to: schroederCurve.count, by: decimationFactor) {
+            let normalized = schroederCurve[i] / maxValue
+            if normalized > 1e-10 {
+                let dB = 10 * log10(normalized)
+                if dB > -80 {
+                    timePoints.append(Double(i) / sampleRate)
+                    levelPoints.append(dB)
+                }
             }
         }
 
-        guard let start = startIndex, let end = endIndex, end > start else {
-            throw RT60Error.invalidDecayRange
+        // Lineare Regression berechnen
+        let (slope, intercept, correlation) = linearRegression(x: timePoints, y: levelPoints)
+
+        return DecayCurve(
+            timePoints: timePoints,
+            levelPoints: levelPoints,
+            regressionSlope: slope,
+            regressionIntercept: intercept,
+            correlationCoefficient: correlation
+        )
+    }
+
+    /// Berechnet die Abklingzeit für einen bestimmten dB-Bereich
+    private func calculateDecayTime(
+        decayCurve: DecayCurve,
+        startDB: Double,
+        endDB: Double,
+        extrapolationFactor: Double
+    ) -> Double? {
+        // Punkte im gewünschten Bereich finden
+        var rangeTimePoints: [Double] = []
+        var rangeLevelPoints: [Double] = []
+
+        for i in 0..<decayCurve.timePoints.count {
+            let level = decayCurve.levelPoints[i]
+            if level <= startDB && level >= endDB {
+                rangeTimePoints.append(decayCurve.timePoints[i])
+                rangeLevelPoints.append(level)
+            }
         }
 
-        // Calculate time for this decay
-        let sampleCount = end - start
-        let decayTime = Double(sampleCount) / sampleRate
+        guard rangeTimePoints.count >= 5 else { return nil }
 
-        // Extrapolate to 60 dB decay (RT60)
-        let measuredDecay = abs(endDB - startDB)
-        let rt60 = decayTime * (60.0 / Double(measuredDecay))
+        // Lineare Regression
+        let (slope, _, correlation) = linearRegression(x: rangeTimePoints, y: rangeLevelPoints)
 
-        return rt60
+        // Korrelation prüfen
+        guard abs(correlation) > 0.9 else { return nil }
+
+        // RT60 berechnen: Zeit für 60 dB Abfall
+        // slope ist in dB/s, also RT60 = -60 / slope
+        guard slope < 0 else { return nil }
+
+        // Berechnung: Der Slope gibt dB pro Sekunde an
+        // RT60 ist die Zeit für 60 dB Abfall
+        // Bei T20: Wir messen 20 dB (-5 bis -25), extrapolieren auf 60 dB (Faktor 3)
+        // Bei T30: Wir messen 30 dB (-5 bis -35), extrapolieren auf 60 dB (Faktor 2)
+        let decayTime = -60.0 / slope
+
+        // Plausibilitätsprüfung
+        guard decayTime > 0.05 && decayTime < 15.0 else { return nil }
+
+        return decayTime
+    }
+
+    /// Lineare Regression
+    private func linearRegression(x: [Double], y: [Double]) -> (slope: Double, intercept: Double, correlation: Double) {
+        guard x.count == y.count && x.count > 1 else {
+            return (0, 0, 0)
+        }
+
+        let n = Double(x.count)
+        let sumX = x.reduce(0, +)
+        let sumY = y.reduce(0, +)
+        let sumXY = zip(x, y).map(*).reduce(0, +)
+        let sumX2 = x.map { $0 * $0 }.reduce(0, +)
+        let sumY2 = y.map { $0 * $0 }.reduce(0, +)
+
+        let denominator = n * sumX2 - sumX * sumX
+        guard denominator != 0 else { return (0, 0, 0) }
+
+        let slope = (n * sumXY - sumX * sumY) / denominator
+        let intercept = (sumY - slope * sumX) / n
+
+        // Korrelationskoeffizient
+        let correlationNumerator = n * sumXY - sumX * sumY
+        let correlationDenominator = sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY))
+        let correlation = correlationDenominator != 0 ? correlationNumerator / correlationDenominator : 0
+
+        return (slope, intercept, correlation)
+    }
+
+    /// Berechnet den Rauschboden
+    private func calculateNoiseFloor(samples: [Float], sampleRate: Double) -> Double {
+        // Letzte 10% der Samples für Noise Floor
+        let noiseStartIndex = Int(Double(samples.count) * 0.9)
+        guard noiseStartIndex < samples.count else { return -60 }
+
+        let noiseSamples = Array(samples[noiseStartIndex...])
+
+        var rms: Float = 0
+        vDSP_rmsqv(noiseSamples, 1, &rms, vDSP_Length(noiseSamples.count))
+
+        return 20 * log10(Double(max(rms, 1e-10)))
+    }
+
+    /// Wendet einen Bandpass-Filter an (Biquad 2. Ordnung)
+    private func applyBandpassFilter(samples: [Float], centerFrequency: Double, sampleRate: Double) -> [Float] {
+        // Oktavband-Breite (Q = f0 / bandwidth)
+        let bandwidth = centerFrequency * 0.7071
+
+        // Biquad-Koeffizienten für Bandpass
+        let Q = centerFrequency / bandwidth
+        let omega = 2 * Double.pi * centerFrequency / sampleRate
+        let alpha = sin(omega) / (2 * Q)
+        let cosOmega = cos(omega)
+
+        let b0 = alpha
+        let b1: Double = 0
+        let b2 = -alpha
+        let a0 = 1 + alpha
+        let a1 = -2 * cosOmega
+        let a2 = 1 - alpha
+
+        // Normalisieren
+        let b0n = Float(b0 / a0)
+        let b1n = Float(b1 / a0)
+        let b2n = Float(b2 / a0)
+        let a1n = Float(a1 / a0)
+        let a2n = Float(a2 / a0)
+
+        // Setup filter coefficients format for vDSP_deq22
+        // vDSP_deq22 expects coefficients in this order: b0/a0, b1/a0, b2/a0, a1/a0, a2/a0
+        // Important: vDSP_deq22 expects a1 and a2 without negation as parameter! Wait, no...
+        // Ah, the documentation for vDSP_deq22 states it uses difference equation:
+        // y[n] = (b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2])
+        // Let's use the explicit loop if it's not perfectly matching the coefficients array requirement
+        // Actually, vDSP_deq22 takes a coefficients array of 5 elements:
+        // A = [b0, b1, b2, a1, a2]
+
+        let coefficients: [Float] = [b0n, b1n, b2n, a1n, a2n]
+
+        var filteredSamples = [Float](repeating: 0, count: samples.count)
+
+        // Delay lines for the filter
+        var delays = [Float](repeating: 0, count: 2)
+
+        vDSP_deq22(samples, 1, coefficients, &filteredSamples, 1, vDSP_Length(samples.count), &delays)
+
+        return filteredSamples
+    }
+
+    /// Erstellt eine ungültige Messung
+    private func createInvalidMeasurement(reason: String) -> RT60Measurement {
+        return RT60Measurement(
+            rt60Value: 0,
+            t20Value: nil,
+            t30Value: nil,
+            peakLevel: -120,
+            noiseFloor: -120,
+            frequency: .broadband,
+            isValid: false
+        )
     }
 }

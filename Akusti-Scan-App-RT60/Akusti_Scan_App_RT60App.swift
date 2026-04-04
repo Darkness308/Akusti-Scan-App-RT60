@@ -10,26 +10,15 @@ import SwiftData
 
 @main
 struct Akusti_Scan_App_RT60App: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            MeasurementRecord.self,
-            SavedRoom.self
-        ])
-        let modelConfiguration = ModelConfiguration(
-            schema: schema,
-            isStoredInMemoryOnly: false
-        )
 
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+    let container = DependencyContainer.shared
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(viewModel: RT60ViewModel(
+                audioRecorder: container.audioRecorder,
+                rt60Calculator: container.rt60Calculator
+            ))
         }
         .modelContainer(sharedModelContainer)
     }

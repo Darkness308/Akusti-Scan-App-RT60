@@ -2,151 +2,225 @@
 //  AudioRecorder.swift
 //  Akusti-Scan-App-RT60
 //
-//  Audio recording service for RT60 measurements
+//  Created by Marc Schneider-Handrup on 03.11.25.
 //
 
 import AVFoundation
-import Accelerate
+import Combine
 
-/// Errors that can occur during audio operations
-enum AudioError: Error, LocalizedError {
-    case microphoneAccessDenied
-    case microphoneAccessRestricted
-    case recordingFailed(String)
-    case engineStartFailed(String)
-    case noAudioData
-
-    var errorDescription: String? {
-        switch self {
-        case .microphoneAccessDenied:
-            return "Mikrofonzugriff wurde verweigert. Bitte aktivieren Sie den Zugriff in den Einstellungen."
-        case .microphoneAccessRestricted:
-            return "Mikrofonzugriff ist eingeschränkt."
-        case .recordingFailed(let message):
-            return "Aufnahme fehlgeschlagen: \(message)"
-        case .engineStartFailed(let message):
-            return "Audio-Engine konnte nicht gestartet werden: \(message)"
-        case .noAudioData:
-            return "Keine Audiodaten verfügbar."
-        }
-    }
+/// Status des Audio-Recorders
+enum RecorderState {
+    case idle
+    case requestingPermission
+    case permissionDenied
+    case preparing
+    case recording
+    case processing
+    case error(String)
 }
 
-/// Service for recording audio and capturing samples for RT60 analysis
+/// Audio-Recorder für RT60-Messungen
 @MainActor
-@Observable
-final class AudioRecorder {
+final class AudioRecorder: NSObject, ObservableObject, AudioRecording {
+    // MARK: - Published Properties
 
-    // MARK: - Properties
+    @Published private(set) var state: RecorderState = .idle
+    @Published private(set) var currentLevel: Float = -160
+    @Published private(set) var peakLevel: Float = -160
+    @Published private(set) var recordedSamples: [Float] = []
+    @Published private(set) var isImpulseDetected: Bool = false
+
+    var statePublisher: AnyPublisher<RecorderState, Never> { $state.eraseToAnyPublisher() }
+    var currentLevelPublisher: AnyPublisher<Float, Never> { $currentLevel.eraseToAnyPublisher() }
+    var peakLevelPublisher: AnyPublisher<Float, Never> { $peakLevel.eraseToAnyPublisher() }
+    var isImpulseDetectedPublisher: AnyPublisher<Bool, Never> { $isImpulseDetected.eraseToAnyPublisher() }
+
+    // MARK: - Private Properties
 
     private var audioEngine: AVAudioEngine?
-    private var audioBuffer: [Float] = []
+    private var inputNode: AVAudioInputNode?
+    private var sampleRate: Double = 44100
+    private var bufferSize: AVAudioFrameCount = 4096
 
-    private(set) var isRecording = false
-    private(set) var currentLevel: Float = 0
-    private(set) var error: AudioError?
-
-    /// Sample rate for audio capture (44.1 kHz standard)
-    let sampleRate: Double = 44100
-
-    /// Buffer size for FFT analysis
-    let bufferSize: AVAudioFrameCount = 4096
+    private var allSamples: [Float] = []
+    private var impulseThreshold: Float = 0.5
+    private var impulseDetectionEnabled: Bool = true
+    private var recordingStartTime: Date?
+    private var maxRecordingDuration: TimeInterval = 10.0
 
     // MARK: - Initialization
 
-    init() {}
+    override init() {
+        super.init()
+    }
 
-    // MARK: - Permission Handling
+    // MARK: - Public Methods
 
-    /// Request microphone permission
+    /// Überprüft und fordert Mikrofonberechtigung an
     func requestPermission() async -> Bool {
-        let status = AVAudioApplication.shared.recordPermission
+        state = .requestingPermission
 
-        switch status {
-        case .granted:
-            return true
-        case .denied:
-            error = .microphoneAccessDenied
-            return false
-        case .undetermined:
+        // iOS 17+ verwendet AVAudioApplication, ältere Versionen AVAudioSession
+        if #available(iOS 17.0, *) {
             return await withCheckedContinuation { continuation in
                 AVAudioApplication.requestRecordPermission { granted in
-                    continuation.resume(returning: granted)
+                    Task { @MainActor in
+                        if granted {
+                            self.state = .idle
+                        } else {
+                            self.state = .permissionDenied
+                        }
+                        continuation.resume(returning: granted)
+                    }
                 }
             }
-        @unknown default:
-            return false
+        } else {
+            return await withCheckedContinuation { continuation in
+                AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                    Task { @MainActor in
+                        if granted {
+                            self.state = .idle
+                        } else {
+                            self.state = .permissionDenied
+                        }
+                        continuation.resume(returning: granted)
+                    }
+                }
+            }
         }
     }
 
-    // MARK: - Recording
-
-    /// Start recording audio
+    /// Startet die Audioaufnahme
     func startRecording() async throws {
-        guard await requestPermission() else {
-            throw AudioError.microphoneAccessDenied
+        guard state != .recording else { return }
+
+        state = .preparing
+
+        // Audio-Session konfigurieren
+        let audioSession = AVAudioSession.sharedInstance()
+        try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetooth])
+        try audioSession.setActive(true)
+
+        // Audio-Engine aufsetzen
+        audioEngine = AVAudioEngine()
+        guard let engine = audioEngine else {
+            throw AudioRecorderError.engineInitializationFailed
         }
 
-        let engine = AVAudioEngine()
-        let inputNode = engine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
+        inputNode = engine.inputNode
+        guard let input = inputNode else {
+            throw AudioRecorderError.inputNodeNotAvailable
+        }
 
-        // Clear previous buffer
-        audioBuffer.removeAll()
+        let format = input.outputFormat(forBus: 0)
+        sampleRate = format.sampleRate
 
-        // Install tap on input node to capture audio
-        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format) { [weak self] buffer, _ in
-            guard let self = self else { return }
+        // Reset
+        allSamples = []
+        peakLevel = -160
+        isImpulseDetected = false
+        recordingStartTime = Date()
 
-            // Get audio samples
-            guard let channelData = buffer.floatChannelData?[0] else { return }
-            let frameLength = Int(buffer.frameLength)
-
-            // Append samples to buffer
-            let samples = Array(UnsafeBufferPointer(start: channelData, count: frameLength))
-
-            Task { @MainActor in
-                self.audioBuffer.append(contentsOf: samples)
-                self.currentLevel = self.calculateRMSLevel(samples)
+        // Tap installieren
+        input.installTap(onBus: 0, bufferSize: bufferSize, format: format) { [weak self] buffer, _ in
+            Task { @MainActor [weak self] in
+                self?.processAudioBuffer(buffer)
             }
         }
 
-        // Configure audio session
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .measurement)
-        try session.setActive(true)
+        // Engine starten
+        try engine.start()
+        state = .recording
+    }
 
-        // Start engine
-        do {
-            try engine.start()
-            audioEngine = engine
-            isRecording = true
-        } catch {
-            throw AudioError.engineStartFailed(error.localizedDescription)
+    /// Stoppt die Aufnahme
+    func stopRecording() {
+        inputNode?.removeTap(onBus: 0)
+        audioEngine?.stop()
+        audioEngine = nil
+        inputNode = nil
+
+        recordedSamples = allSamples
+        state = .idle
+    }
+
+    /// Setzt den Recorder zurück
+    func reset() {
+        stopRecording()
+        allSamples = []
+        recordedSamples = []
+        currentLevel = -160
+        peakLevel = -160
+        isImpulseDetected = false
+    }
+
+    /// Gibt aufgenommene Audio-Samples zurück
+    func getAudioSample() -> AudioSample {
+        return AudioSample(
+            samples: recordedSamples,
+            sampleRate: sampleRate,
+            channelCount: 1,
+            duration: Double(recordedSamples.count) / sampleRate
+        )
+    }
+
+    // MARK: - Private Methods
+
+    private func processAudioBuffer(_ buffer: AVAudioPCMBuffer) {
+        guard let channelData = buffer.floatChannelData else { return }
+
+        let frameLength = Int(buffer.frameLength)
+        let samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameLength))
+
+        // Samples speichern
+        allSamples.append(contentsOf: samples)
+
+        // Level berechnen
+        let rms = calculateRMS(samples)
+        let rmsDB = 20 * log10(max(rms, 1e-10))
+        currentLevel = rmsDB
+
+        // Peak-Level aktualisieren
+        let peak = samples.map { abs($0) }.max() ?? 0
+        let peakDB = 20 * log10(max(peak, 1e-10))
+        if peakDB > peakLevel {
+            peakLevel = peakDB
+        }
+
+        // Impuls-Erkennung
+        if impulseDetectionEnabled && peak > impulseThreshold && !isImpulseDetected {
+            isImpulseDetected = true
+        }
+
+        // Automatisches Stoppen nach maximaler Dauer
+        if let startTime = recordingStartTime,
+           Date().timeIntervalSince(startTime) > maxRecordingDuration {
+            stopRecording()
         }
     }
 
-    /// Stop recording and return captured samples
-    func stopRecording() -> [Float] {
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine?.stop()
-        audioEngine = nil
-        isRecording = false
-
-        return audioBuffer
-    }
-
-    // MARK: - Audio Analysis
-
-    /// Calculate RMS level of audio samples
-    private func calculateRMSLevel(_ samples: [Float]) -> Float {
+    private func calculateRMS(_ samples: [Float]) -> Float {
         guard !samples.isEmpty else { return 0 }
+        let sumOfSquares = samples.reduce(0) { $0 + $1 * $1 }
+        return sqrt(sumOfSquares / Float(samples.count))
+    }
+}
 
-        var rms: Float = 0
-        vDSP_rmsqv(samples, 1, &rms, vDSP_Length(samples.count))
+// MARK: - Errors
 
-        // Convert to decibels
-        let db = 20 * log10(rms)
-        return max(-60, min(0, db)) // Clamp between -60 dB and 0 dB
+enum AudioRecorderError: LocalizedError {
+    case engineInitializationFailed
+    case inputNodeNotAvailable
+    case permissionDenied
+
+    var errorDescription: String? {
+        switch self {
+        case .engineInitializationFailed:
+            return "Audio-Engine konnte nicht initialisiert werden"
+        case .inputNodeNotAvailable:
+            return "Mikrofon-Eingang nicht verfügbar"
+        case .permissionDenied:
+            return "Mikrofonzugriff wurde verweigert"
+        }
     }
 }
