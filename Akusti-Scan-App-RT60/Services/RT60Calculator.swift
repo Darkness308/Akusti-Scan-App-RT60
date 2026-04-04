@@ -6,9 +6,10 @@
 //
 
 import Foundation
+import Accelerate
 
 /// RT60-Berechnungsservice
-final class RT60Calculator {
+final class RT60Calculator: RT60Calculating {
     // MARK: - Configuration
 
     private let windowSize: Int = 2048
@@ -165,8 +166,9 @@ final class RT60Calculator {
         // Samples nach dem Impuls
         let decaySamples = Array(samples[startIndex...])
 
-        // Quadrieren der Samples
-        let squaredSamples = decaySamples.map { $0 * $0 }
+        // Quadrieren der Samples mit vDSP
+        var squaredSamples = [Float](repeating: 0, count: decaySamples.count)
+        vDSP_vsq(decaySamples, 1, &squaredSamples, 1, vDSP_Length(decaySamples.count))
 
         // Rückwärts-Integration (Schroeder)
         var schroederCurve = [Double](repeating: 0, count: squaredSamples.count)
@@ -284,7 +286,9 @@ final class RT60Calculator {
         guard noiseStartIndex < samples.count else { return -60 }
 
         let noiseSamples = Array(samples[noiseStartIndex...])
-        let rms = sqrt(noiseSamples.map { $0 * $0 }.reduce(0, +) / Float(noiseSamples.count))
+
+        var rms: Float = 0
+        vDSP_rmsqv(noiseSamples, 1, &rms, vDSP_Length(noiseSamples.count))
 
         return 20 * log10(Double(max(rms, 1e-10)))
     }
@@ -314,22 +318,23 @@ final class RT60Calculator {
         let a1n = Float(a1 / a0)
         let a2n = Float(a2 / a0)
 
-        // Filter anwenden
+        // Setup filter coefficients format for vDSP_deq22
+        // vDSP_deq22 expects coefficients in this order: b0/a0, b1/a0, b2/a0, a1/a0, a2/a0
+        // Important: vDSP_deq22 expects a1 and a2 without negation as parameter! Wait, no...
+        // Ah, the documentation for vDSP_deq22 states it uses difference equation:
+        // y[n] = (b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2])
+        // Let's use the explicit loop if it's not perfectly matching the coefficients array requirement
+        // Actually, vDSP_deq22 takes a coefficients array of 5 elements:
+        // A = [b0, b1, b2, a1, a2]
+
+        let coefficients: [Float] = [b0n, b1n, b2n, a1n, a2n]
+
         var filteredSamples = [Float](repeating: 0, count: samples.count)
-        var x1: Float = 0, x2: Float = 0
-        var y1: Float = 0, y2: Float = 0
 
-        for i in 0..<samples.count {
-            let x0 = samples[i]
-            let y0 = b0n * x0 + b1n * x1 + b2n * x2 - a1n * y1 - a2n * y2
+        // Delay lines for the filter
+        var delays = [Float](repeating: 0, count: 2)
 
-            filteredSamples[i] = y0
-
-            x2 = x1
-            x1 = x0
-            y2 = y1
-            y1 = y0
-        }
+        vDSP_deq22(samples, 1, coefficients, &filteredSamples, 1, vDSP_Length(samples.count), &delays)
 
         return filteredSamples
     }

@@ -9,9 +9,15 @@ import SwiftUI
 
 @main
 struct Akusti_Scan_App_RT60App: App {
+
+    let container = DependencyContainer.shared
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(viewModel: RT60ViewModel(
+                audioRecorder: container.audioRecorder,
+                rt60Calculator: container.rt60Calculator
+            ))
         }
     }
 }

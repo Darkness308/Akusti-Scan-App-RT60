@@ -43,8 +43,8 @@ final class RT60ViewModel: ObservableObject {
 
     // MARK: - Private Properties
 
-    private let audioRecorder = AudioRecorder()
-    private let rt60Calculator = RT60Calculator()
+    private let audioRecorder: AudioRecording
+    private let rt60Calculator: RT60Calculating
     private var cancellables = Set<AnyCancellable>()
 
     // MARK: - Computed Properties
@@ -66,7 +66,9 @@ final class RT60ViewModel: ObservableObject {
 
     // MARK: - Initialization
 
-    init() {
+    init(audioRecorder: AudioRecording, rt60Calculator: RT60Calculating) {
+        self.audioRecorder = audioRecorder
+        self.rt60Calculator = rt60Calculator
         setupBindings()
     }
 
@@ -165,16 +167,16 @@ final class RT60ViewModel: ObservableObject {
 
     private func setupBindings() {
         // Level-Updates vom Recorder
-        audioRecorder.$currentLevel
+        audioRecorder.currentLevelPublisher
             .receive(on: DispatchQueue.main)
             .assign(to: &$currentLevel)
 
-        audioRecorder.$peakLevel
+        audioRecorder.peakLevelPublisher
             .receive(on: DispatchQueue.main)
             .assign(to: &$peakLevel)
 
         // Impuls-Erkennung
-        audioRecorder.$isImpulseDetected
+        audioRecorder.isImpulseDetectedPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] detected in
                 if detected && self?.measurementState == .waitingForImpulse {
@@ -184,7 +186,7 @@ final class RT60ViewModel: ObservableObject {
             .store(in: &cancellables)
 
         // Recorder-Status
-        audioRecorder.$state
+        audioRecorder.statePublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
                 switch state {
@@ -210,17 +212,27 @@ final class RT60ViewModel: ObservableObject {
             return
         }
 
-        // RT60 berechnen
-        let measurement = rt60Calculator.calculateRT60(from: audioSample)
+        let calculator = rt60Calculator
+        let bandAnalysisEnabled = showBandAnalysis
+
+        // Calculate RT60 in a detached background task to prevent blocking the MainActor
+        let result = await Task.detached { () -> (RT60Measurement, DecayCurve, [FrequencyBand: RT60Measurement]) in
+            let measurement = calculator.calculateRT60(from: audioSample)
+            let decayCurve = calculator.generateDecayCurve(from: audioSample)
+
+            var bandMeasurements: [FrequencyBand: RT60Measurement] = [:]
+            if bandAnalysisEnabled {
+                bandMeasurements = calculator.calculateRT60ByBand(from: audioSample)
+            }
+
+            return (measurement, decayCurve, bandMeasurements)
+        }.value
+
+        let (measurement, decayCurveResult, bandMeasurementsResult) = result
+
         latestMeasurement = measurement
-
-        // Decay-Kurve für Visualisierung
-        decayCurve = rt60Calculator.generateDecayCurve(from: audioSample)
-
-        // Frequenzband-Analyse
-        if showBandAnalysis {
-            bandMeasurements = rt60Calculator.calculateRT60ByBand(from: audioSample)
-        }
+        decayCurve = decayCurveResult
+        bandMeasurements = bandMeasurementsResult
 
         // Zur Historie hinzufügen
         if measurement.isValid {
