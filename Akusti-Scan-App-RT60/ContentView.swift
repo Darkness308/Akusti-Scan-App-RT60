@@ -8,10 +8,14 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var viewModel = RT60ViewModel()
+    @StateObject private var viewModel: RT60ViewModel
     @State private var showSettings = false
     @State private var showHistory = false
     @State private var showExport = false
+
+    init(viewModel: RT60ViewModel) {
+        _viewModel = StateObject(wrappedValue: viewModel)
+    }
 
     var body: some View {
         NavigationStack {
@@ -617,5 +621,8 @@ struct ExportView: View {
 // MARK: - Preview
 
 #Preview {
-    ContentView()
+    ContentView(viewModel: RT60ViewModel(
+        audioRecorder: AudioRecorder(),
+        rt60Calculator: RT60Calculator()
+    ))
 }

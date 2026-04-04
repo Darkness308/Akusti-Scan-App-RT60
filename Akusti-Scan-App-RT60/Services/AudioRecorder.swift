@@ -21,7 +21,7 @@ enum RecorderState {
 
 /// Audio-Recorder für RT60-Messungen
 @MainActor
-final class AudioRecorder: NSObject, ObservableObject {
+final class AudioRecorder: NSObject, ObservableObject, AudioRecording {
     // MARK: - Published Properties
 
     @Published private(set) var state: RecorderState = .idle
@@ -29,6 +29,11 @@ final class AudioRecorder: NSObject, ObservableObject {
     @Published private(set) var peakLevel: Float = -160
     @Published private(set) var recordedSamples: [Float] = []
     @Published private(set) var isImpulseDetected: Bool = false
+
+    var statePublisher: AnyPublisher<RecorderState, Never> { $state.eraseToAnyPublisher() }
+    var currentLevelPublisher: AnyPublisher<Float, Never> { $currentLevel.eraseToAnyPublisher() }
+    var peakLevelPublisher: AnyPublisher<Float, Never> { $peakLevel.eraseToAnyPublisher() }
+    var isImpulseDetectedPublisher: AnyPublisher<Bool, Never> { $isImpulseDetected.eraseToAnyPublisher() }
 
     // MARK: - Private Properties
 
