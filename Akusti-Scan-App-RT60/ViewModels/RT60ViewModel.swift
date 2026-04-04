@@ -225,7 +225,7 @@ final class RT60ViewModel: ObservableObject {
             let decayCurve = calculator.generateDecayCurve(from: audioSample)
 
             var bandMeasurements: [FrequencyBand: RT60Measurement] = [:]
-            if bandAnalysisEnabled {
+            if bandAnalysisEnabled && !Task.isCancelled {
                 bandMeasurements = calculator.calculateRT60ByBand(from: audioSample)
             }
 
