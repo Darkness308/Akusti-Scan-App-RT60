@@ -9,7 +9,7 @@ import Foundation
 import Accelerate
 
 /// RT60-Berechnungsservice
-final class RT60Calculator: RT60Calculating {
+final class RT60Calculator: RT60Calculating, Sendable {
     // MARK: - Configuration
 
     private let windowSize: Int = 2048
