@@ -318,15 +318,9 @@ final class RT60Calculator: RT60Calculating, Sendable {
         let a1n = Float(a1 / a0)
         let a2n = Float(a2 / a0)
 
-        // Setup filter coefficients format for vDSP_deq22
-        // vDSP_deq22 expects coefficients in this order: b0/a0, b1/a0, b2/a0, a1/a0, a2/a0
-        // Important: vDSP_deq22 expects a1 and a2 without negation as parameter! Wait, no...
-        // Ah, the documentation for vDSP_deq22 states it uses difference equation:
-        // y[n] = (b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2])
-        // Let's use the explicit loop if it's not perfectly matching the coefficients array requirement
-        // Actually, vDSP_deq22 takes a coefficients array of 5 elements:
-        // A = [b0, b1, b2, a1, a2]
-
+        // vDSP_deq22 uses coefficients ordered as [b0, b1, b2, a1, a2].
+        // This matches the difference equation:
+        // y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2]
         let coefficients: [Float] = [b0n, b1n, b2n, a1n, a2n]
 
         var filteredSamples = [Float](repeating: 0, count: samples.count)
