@@ -8,7 +8,7 @@
 import Foundation
 
 /// Repräsentiert eine einzelne RT60-Messung
-struct RT60Measurement: Identifiable, Codable, Sendable {
+struct RT60Measurement: Identifiable, Codable {
     let id: UUID
     let timestamp: Date
     let rt60Value: Double // in Sekunden
@@ -43,7 +43,7 @@ struct RT60Measurement: Identifiable, Codable, Sendable {
 }
 
 /// Frequenzbänder für oktavbasierte Analyse
-enum FrequencyBand: String, CaseIterable, Codable, Sendable {
+enum FrequencyBand: String, CaseIterable, Codable {
     case broadband = "Breitband"
     case hz125 = "125 Hz"
     case hz250 = "250 Hz"
@@ -112,7 +112,7 @@ enum RoomType: String, CaseIterable {
 }
 
 /// Audio-Sample für die Verarbeitung
-struct AudioSample: Sendable {
+struct AudioSample {
     let samples: [Float]
     let sampleRate: Double
     let channelCount: Int
@@ -136,7 +136,7 @@ struct AudioSample: Sendable {
 }
 
 /// Decay-Kurve für Visualisierung
-struct DecayCurve: Identifiable, Sendable {
+struct DecayCurve: Identifiable {
     let id = UUID()
     let timePoints: [Double] // in Sekunden
     let levelPoints: [Double] // in dB

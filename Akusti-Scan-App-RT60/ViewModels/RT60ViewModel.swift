@@ -46,7 +46,6 @@ final class RT60ViewModel: ObservableObject {
     private let audioRecorder: AudioRecording
     private let rt60Calculator: RT60Calculating
     private var cancellables = Set<AnyCancellable>()
-    private var processingTask: Task<Void, Never>?
 
     // MARK: - Computed Properties
 
@@ -107,16 +106,13 @@ final class RT60ViewModel: ObservableObject {
         audioRecorder.stopRecording()
         measurementState = .processing
 
-        processingTask?.cancel()
-        processingTask = Task {
+        Task {
             await processMeasurement()
         }
     }
 
     /// Setzt alles zurück für eine neue Messung
     func resetMeasurement() {
-        processingTask?.cancel()
-        processingTask = nil
         audioRecorder.reset()
         latestMeasurement = nil
         decayCurve = nil
@@ -225,7 +221,7 @@ final class RT60ViewModel: ObservableObject {
             let decayCurve = calculator.generateDecayCurve(from: audioSample)
 
             var bandMeasurements: [FrequencyBand: RT60Measurement] = [:]
-            if bandAnalysisEnabled && !Task.isCancelled {
+            if bandAnalysisEnabled {
                 bandMeasurements = calculator.calculateRT60ByBand(from: audioSample)
             }
 
@@ -233,8 +229,6 @@ final class RT60ViewModel: ObservableObject {
         }.value
 
         let (measurement, decayCurveResult, bandMeasurementsResult) = result
-
-        guard !Task.isCancelled else { return }
 
         latestMeasurement = measurement
         decayCurve = decayCurveResult
