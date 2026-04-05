@@ -8,6 +8,7 @@
 
 import AVFoundation
 import Accelerate
+import Observation
 
 /// Measurement method for RT60
 enum MeasurementMethod: String, CaseIterable, Identifiable {
