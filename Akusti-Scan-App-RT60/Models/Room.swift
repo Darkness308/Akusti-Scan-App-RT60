@@ -13,12 +13,41 @@ struct AcousticMaterial: Identifiable, Codable, Sendable {
     let name: String
     let absorptionCoefficients: [FrequencyBand: Double]
 
-    init(id: UUID = UUID(), name: String, coefficients: [FrequencyBand: Double]) {
-        self.id = id
+    init(id: UUID? = nil, name: String, coefficients: [FrequencyBand: Double]) {
         self.name = name
+        self.id = id ?? Self.stableID(for: name)
         self.absorptionCoefficients = coefficients
     }
 
+    private static func stableID(for materialName: String) -> UUID {
+        let normalizedName = materialName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let utf8Bytes = Array(normalizedName.utf8)
+        var bytes = [UInt8](repeating: 0, count: 16)
+
+        for (index, byte) in utf8Bytes.enumerated() {
+            let position = index % 16
+            let mixed = byte &+ UInt8(truncatingIfNeeded: index &* 31)
+            bytes[position] = bytes[position] &+ mixed
+            bytes[(position &+ 5) % 16] = bytes[(position &+ 5) % 16] ^ (mixed &* 17)
+        }
+
+        if utf8Bytes.isEmpty {
+            bytes[0] = 0x61
+            bytes[1] = 0x6D
+            bytes[2] = 0x61
+            bytes[3] = 0x74
+        }
+
+        bytes[6] = (bytes[6] & 0x0F) | 0x50
+        bytes[8] = (bytes[8] & 0x3F) | 0x80
+
+        return UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
+    }
     func absorption(at frequency: FrequencyBand) -> Double {
         absorptionCoefficients[frequency] ?? 0.1
     }
