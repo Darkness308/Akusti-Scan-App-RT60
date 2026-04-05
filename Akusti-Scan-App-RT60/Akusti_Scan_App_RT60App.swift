@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct Akusti_Scan_App_RT60App: App {
@@ -19,5 +20,6 @@ struct Akusti_Scan_App_RT60App: App {
                 rt60Calculator: container.rt60Calculator
             ))
         }
+        .modelContainer(sharedModelContainer)
     }
 }
