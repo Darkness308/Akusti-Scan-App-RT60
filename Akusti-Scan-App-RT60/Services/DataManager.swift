@@ -7,6 +7,7 @@
 
 import SwiftData
 import Foundation
+import Observation
 
 /// Manager for persisting and retrieving data
 @MainActor
