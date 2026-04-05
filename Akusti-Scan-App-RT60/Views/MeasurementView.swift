@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import UIKit
 
 struct MeasurementView: View {
     @Environment(\.modelContext) private var modelContext
