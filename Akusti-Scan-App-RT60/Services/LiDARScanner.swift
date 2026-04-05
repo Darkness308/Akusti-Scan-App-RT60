@@ -8,6 +8,7 @@
 import ARKit
 import RealityKit
 import Combine
+import Observation
 
 /// Errors during LiDAR scanning
 enum LiDARError: Error, LocalizedError {
