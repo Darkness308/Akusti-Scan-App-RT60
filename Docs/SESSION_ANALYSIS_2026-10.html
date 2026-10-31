@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AcoustiScan Repo-Analyse Oktober 2026</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+:root {
+  --c-primary: #1e3a5f;
+  --c-accent: #d96c2c;
+  --c-success: #2d8659;
+  --c-warning: #b8941f;
+  --c-danger: #c23d3d;
+  --c-bg: #f8f9fb;
+  --c-surface: #ffffff;
+  --c-text: #1a1d23;
+  --c-text-muted: #5a6170;
+  --c-border: #dfe2e8;
+  --c-code-bg: #f0f2f5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --c-primary: #4a7eb8;
+    --c-accent: #e8863f;
+    --c-success: #3da86f;
+    --c-warning: #d4aa2a;
+    --c-danger: #e05555;
+    --c-bg: #0f1218;
+    --c-surface: #1a1f28;
+    --c-text: #e8eaef;
+    --c-text-muted: #8a92a3;
+    --c-border: #2d3340;
+    --c-code-bg: #252b38;
+  }
+}
+
+:root[data-theme="dark"] {
+  --c-primary: #4a7eb8;
+  --c-accent: #e8863f;
+  --c-success: #3da86f;
+  --c-warning: #d4aa2a;
+  --c-danger: #e05555;
+  --c-bg: #0f1218;
+  --c-surface: #1a1f28;
+  --c-text: #e8eaef;
+  --c-text-muted: #8a92a3;
+  --c-border: #2d3340;
+  --c-code-bg: #252b38;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--c-text);
+  background: var(--c-bg);
+  padding: 2rem;
+}
+
+.container {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+header {
+  border-bottom: 2px solid var(--c-primary);
+  padding-bottom: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.eyebrow {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--c-accent);
+  margin-bottom: 0.5rem;
+}
+
+.version-badge {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  background: var(--c-primary);
+  color: #fff;
+  padding: 0.2rem 0.5rem;
+  border-radius: 3px;
+  margin-left: 0.5rem;
+}
+
+h1 {
+  font-family: 'Source Serif 4', Georgia, serif;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--c-primary);
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.subtitle {
+  color: var(--c-text-muted);
+  margin-top: 0.5rem;
+}
+
+h2 {
+  font-family: 'Source Serif 4', Georgia, serif;
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--c-text);
+  margin: 2.5rem 0 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--c-border);
+}
+
+h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--c-text);
+  margin: 1.5rem 0 0.75rem;
+}
+
+p { margin-bottom: 1rem; }
+
+.card {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin: 1rem 0;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+}
+
+.status-active { background: var(--c-success); color: #fff; }
+.status-dead { background: var(--c-danger); color: #fff; }
+.status-warning { background: var(--c-warning); color: #1a1d23; }
+.status-archive { background: var(--c-text-muted); color: #fff; }
+
+.repo-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.stat {
+  background: var(--c-code-bg);
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+}
+
+.stat-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.5rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-primary);
+}
+
+.stat-label {
+  font-size: 0.75rem;
+  color: var(--c-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin: 1rem 0;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--c-border);
+}
+
+th {
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--c-text-muted);
+  background: var(--c-code-bg);
+}
+
+td:first-child { font-weight: 500; }
+
+.contributor-type {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  background: var(--c-code-bg);
+}
+
+.type-human { border-left: 2px solid var(--c-success); }
+.type-ai { border-left: 2px solid var(--c-accent); }
+.type-ci { border-left: 2px solid var(--c-text-muted); }
+
+ul, ol {
+  margin: 0.75rem 0 1rem 1.25rem;
+}
+
+li { margin-bottom: 0.4rem; }
+
+code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85em;
+  background: var(--c-code-bg);
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+}
+
+.highlight-box {
+  background: var(--c-surface);
+  border-left: 3px solid var(--c-accent);
+  padding: 1rem 1.25rem;
+  margin: 1.5rem 0;
+}
+
+.highlight-box strong {
+  color: var(--c-accent);
+}
+
+.alert-box {
+  background: var(--c-surface);
+  border: 1px solid var(--c-danger);
+  border-left: 4px solid var(--c-danger);
+  padding: 1rem 1.25rem;
+  margin: 1.5rem 0;
+  border-radius: 4px;
+}
+
+.timeline {
+  margin: 1rem 0;
+  padding-left: 1rem;
+  border-left: 2px solid var(--c-border);
+}
+
+.timeline-item {
+  position: relative;
+  padding: 0.5rem 0 0.5rem 1rem;
+}
+
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: -1.35rem;
+  top: 0.85rem;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-primary);
+}
+
+.timeline-item.current::before {
+  background: var(--c-accent);
+  box-shadow: 0 0 0 3px var(--c-bg), 0 0 0 5px var(--c-accent);
+}
+
+.timeline-date {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--c-text-muted);
+}
+
+.version-history {
+  background: var(--c-code-bg);
+  padding: 1rem;
+  border-radius: 6px;
+  margin: 1rem 0;
+}
+
+.version-history h4 {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--c-text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.version-history ul {
+  margin: 0;
+  padding-left: 1rem;
+  font-size: 0.85rem;
+}
+
+footer {
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--c-border);
+  font-size: 0.8rem;
+  color: var(--c-text-muted);
+  text-align: center;
+}
+
+footer a {
+  color: var(--c-primary);
+  text-decoration: none;
+}
+
+footer a:hover {
+  text-decoration: underline;
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="eyebrow">Session-Analyse <span class="version-badge">v2 Oktober</span></div>
+    <h1>AcoustiScan RT60 — Repo-Status & Archivierung</h1>
+    <p class="subtitle">Finale Bestandsaufnahme vor Archivierung</p>
+  </header>
+
+  <div class="alert-box">
+    <strong>Status Oktober 2026:</strong> Dieses Repository ist seit <strong>7 Monaten inaktiv</strong> (letzter Commit: 05.04.2026).
+    PR #6 mit dieser Analyse ist noch offen. Empfehlung: Mergen und archivieren.
+  </div>
+
+  <h2>Was ist AcoustiScan?</h2>
+  <p>Eine iOS-App zur <strong>Raumakustik-Messung</strong> für iPad mit LiDAR. Sie berechnet die Nachhallzeit (RT60) nach der <strong>Sabine-Formel</strong> und bewertet Räume nach <strong>DIN 18041</strong> (deutsche Norm für akustische Raumeignung).</p>
+
+  <div class="stat-grid">
+    <div class="stat">
+      <div class="stat-value">RT60</div>
+      <div class="stat-label">Nachhallzeit in Sekunden</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">LiDAR</div>
+      <div class="stat-label">3D-Raumscan per ARKit</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">DIN 18041</div>
+      <div class="stat-label">Norm-konforme Bewertung</div>
+    </div>
+  </div>
+
+  <h2>Die zwei Repositories</h2>
+
+  <div class="card">
+    <div class="card-header">
+      <span class="status-badge status-archive">Archivieren</span>
+      <span class="repo-name">Akusti-Scan-App-RT60</span>
+    </div>
+    <p>Minimaler Audio-Prototyp. Kein LiDAR, keine Sabine-Formel, keine Materialdatenbank. <strong>Letzter Commit: 5. April 2026</strong> — seit 7 Monaten verlassen.</p>
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-value">2.059</div>
+        <div class="stat-label">Zeilen Code</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">35</div>
+        <div class="stat-label">Commits</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">0</div>
+        <div class="stat-label">CI/CD Workflows</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span class="status-badge status-active">Aktiv</span>
+      <span class="repo-name">RT60_ipad_akusti-scan-APP</span>
+    </div>
+    <p>Vollständige Implementation mit LiDAR-Scan, Sabine-Formel, Materialdatenbank, DIN-18041-Bewertung, PDF-Export. <strong>Letzter Commit: 27. Juli 2026</strong> — das aktive Projekt.</p>
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-value">14.728</div>
+        <div class="stat-label">Zeilen Code</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">506</div>
+        <div class="stat-label">Commits</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">2</div>
+        <div class="stat-label">CI/CD Workflows</div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Entwickler-Beiträge</h2>
+
+  <h3>iPad-Repo (aktives Projekt)</h3>
+  <table>
+    <thead>
+      <tr><th>Commits</th><th>Entwickler</th><th>Typ</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>218</td>
+        <td>copilot-swe-agent[bot]</td>
+        <td><span class="contributor-type type-ai">AI</span></td>
+      </tr>
+      <tr>
+        <td>207</td>
+        <td>SiD / Darkness308</td>
+        <td><span class="contributor-type type-human">Mensch</span></td>
+      </tr>
+      <tr>
+        <td>60</td>
+        <td>github-actions[bot]</td>
+        <td><span class="contributor-type type-ci">CI</span></td>
+      </tr>
+      <tr>
+        <td>13</td>
+        <td>Claude</td>
+        <td><span class="contributor-type type-ai">AI</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Dieses Repo (Prototyp)</h3>
+  <table>
+    <thead>
+      <tr><th>Commits</th><th>Entwickler</th><th>Typ</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>16</td>
+        <td>SiD / Darkness308</td>
+        <td><span class="contributor-type type-human">Mensch</span></td>
+      </tr>
+      <tr>
+        <td>9</td>
+        <td>Claude</td>
+        <td><span class="contributor-type type-ai">AI</span></td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td>copilot-swe-agent[bot]</td>
+        <td><span class="contributor-type type-ai">AI</span></td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td>google-labs-jules[bot]</td>
+        <td><span class="contributor-type type-ai">AI (Google)</span></td>
+      </tr>
+      <tr>
+        <td>1</td>
+        <td>Marc Schneider-Handrup</td>
+        <td><span class="contributor-type type-human">Extern</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Wichtige Personen</h2>
+
+  <div class="highlight-box">
+    <strong>Marc Schneider-Handrup</strong> (msh@msh-audio.com)<br>
+    Copyright-Inhaber und ursprünglicher Auftraggeber. Hat den Initial Commit am 03.11.2025 gemacht. Das iPad-Repo wurde für die Fork-Übergabe an ihn/externe Entwickler vorbereitet (proprietäre Lizenz, HANDOFF.md, FORK_READINESS.md).
+  </div>
+
+  <h2>Was fehlt in diesem Repo?</h2>
+  <ul>
+    <li><code>LiDARScanView.swift</code> — ARKit/RealityKit 3D-Raumscan</li>
+    <li><code>MaterialManager.swift</code> — Absorptionskoeffizienten-Datenbank</li>
+    <li><code>DIN18041Database.swift</code> — Norm-Sollwerte nach Raumtyp</li>
+    <li>Sabine-Formel: <code>RT60 = 0.161 × Volumen / Absorptionsfläche</code></li>
+    <li>CI/CD Workflows (build-test.yml, self-healing.yml)</li>
+    <li>PDF-Export mit DIN-konformer Bewertung</li>
+    <li>~12.600 Zeilen produktiver Code</li>
+  </ul>
+
+  <h2>Projekt-Timeline</h2>
+  <div class="timeline">
+    <div class="timeline-item current">
+      <div class="timeline-date">31. Oktober 2026</div>
+      <p><strong>Finale Analyse & Archivierungsempfehlung</strong></p>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-date">26. August 2026</div>
+      <p>Session-Analyse v1 erstellt, PR #6 geöffnet</p>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-date">27. Juli 2026</div>
+      <p>iPad-Repo: PR #298 gemergt (PDF-Export)</p>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-date">06.-07. Juni 2026</div>
+      <p>iPad-Repo: Intensive Entwicklung — DIN-Bewertung, Tests, Cleanup</p>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-date">30. Mai 2026</div>
+      <p>iPad-Repo: Fork-Readiness Dokumentation erstellt</p>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-date" style="color: var(--c-danger);">05. April 2026</div>
+      <p style="color: var(--c-danger);"><strong>Dieses Repo: Letzter Commit — danach keine Aktivität</strong></p>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-date">03. November 2025</div>
+      <p>Initial Commit von Marc Schneider-Handrup</p>
+    </div>
+  </div>
+
+  <h2>Empfehlungen</h2>
+  <ol>
+    <li><strong>PR #6 mergen</strong> — Diese Dokumentation in main übernehmen</li>
+    <li><strong>Dieses Repo archivieren</strong> — GitHub Settings → Danger Zone → Archive</li>
+    <li><strong>Zum iPad-Repo wechseln</strong> — <a href="https://github.com/Darkness308/RT60_ipad_akusti-scan-APP">RT60_ipad_akusti-scan-APP</a></li>
+    <li><strong>Keine weitere Entwicklung hier</strong> — Alles existiert bereits im iPad-Repo</li>
+  </ol>
+
+  <h2>Session-Referenzen</h2>
+  <table>
+    <thead>
+      <tr><th>Typ</th><th>Link</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Claude Session</td>
+        <td><a href="https://claude.ai/code/session_019UfUgLY4c6mUoN7R9gMAiU">session_019UfUgLY4c6mUoN7R9gMAiU</a></td>
+      </tr>
+      <tr>
+        <td>Artifact (August)</td>
+        <td><a href="https://claude.ai/code/artifact/e230abe6-6d66-4fb5-b0ce-d4c0e26194e9">e230abe6-6d66-4fb5-b0ce-d4c0e26194e9</a></td>
+      </tr>
+      <tr>
+        <td>PR #6</td>
+        <td><a href="https://github.com/Darkness308/Akusti-Scan-App-RT60/pull/6">Akusti-Scan-App-RT60/pull/6</a></td>
+      </tr>
+      <tr>
+        <td>iPad-Repo</td>
+        <td><a href="https://github.com/Darkness308/RT60_ipad_akusti-scan-APP">RT60_ipad_akusti-scan-APP</a></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Technische Begriffe</h2>
+  <table>
+    <thead>
+      <tr><th>Begriff</th><th>Erklärung</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>RT60</td><td>Zeit bis Schall um 60dB abklingt (Nachhallzeit)</td></tr>
+      <tr><td>Sabine-Formel</td><td>Berechnet RT60 aus Raumvolumen und Oberflächen-Absorption</td></tr>
+      <tr><td>LiDAR</td><td>Laser-Scanner im iPad Pro für 3D-Raumvermessung</td></tr>
+      <tr><td>DIN 18041</td><td>Deutsche Norm für Hörsamkeit in Räumen</td></tr>
+      <tr><td>Absorptionskoeffizient (α)</td><td>Wie viel Schall ein Material schluckt (0-1)</td></tr>
+      <tr><td>ARKit</td><td>Apples Framework für Augmented Reality</td></tr>
+    </tbody>
+  </table>
+
+  <div class="version-history">
+    <h4>Versions-Historie</h4>
+    <ul>
+      <li><strong>v2 (Oktober 2026)</strong> — Aktualisierte Timeline, Archivierungsempfehlung, PR #6 Status</li>
+      <li><strong>v1 (August 2026)</strong> — Initiale Analyse, Repo-Vergleich, Contributor-Audit</li>
+    </ul>
+  </div>
+
+  <footer>
+    Aktualisiert am 31. Oktober 2026 • Version 2<br>
+    <a href="https://claude.ai/code/session_019UfUgLY4c6mUoN7R9gMAiU">Claude Session</a> •
+    <a href="https://github.com/Darkness308">github.com/Darkness308</a>
+  </footer>
+</div>
+</body>
+</html>
